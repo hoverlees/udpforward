@@ -1,11 +1,8 @@
 package app
 
-import "net"
-
 type Config struct {
 	SourceAddress         string
-	SourceEncryptKey      string
+	SourceEncryptKey      []byte
 	DestinationAddress    string
-	DestinationAddr       net.Addr
-	DestinationEncryptKey string
+	DestinationEncryptKey []byte
 }

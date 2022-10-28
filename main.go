@@ -10,9 +10,25 @@ import (
 	"udpforward/app"
 )
 
-// udpforward --source-address=:9999 --source-key=adfadsfasdfadsf --destination-address=hoverlees.com:3600 --destination-key=123412341234
 var appConfig *app.Config = &app.Config{}
 var targetConnMap *sync.Map = &sync.Map{}
+
+func xorData(data []byte, key []byte) []byte {
+	if len(key) == 0 {
+		return data
+	}
+	dataLen := len(data)
+	keyLen := len(key)
+	keyIndex := 0
+	for i := 0; i < dataLen; i++ {
+		data[i] = data[i] ^ key[keyIndex]
+		keyIndex++
+		if keyIndex >= keyLen {
+			keyIndex = 0
+		}
+	}
+	return data
+}
 
 func startTunnelSession(readConn net.PacketConn, toConn net.PacketConn, toAddr net.Addr) {
 	for {
@@ -24,16 +40,20 @@ func startTunnelSession(readConn net.PacketConn, toConn net.PacketConn, toAddr n
 			break
 		}
 		log.Printf("received %d bytes, from addr=%v", n, addr)
-		toConn.WriteTo(buffer[0:n], toAddr)
+		data := xorData(buffer[0:n], appConfig.DestinationEncryptKey)
+		data = xorData(data, appConfig.SourceEncryptKey)
+		toConn.WriteTo(data, toAddr)
 	}
 	targetConnMap.Delete(toAddr.String())
 }
 
 func main() {
+	sourceEncryptKey := ""
+	destinationEncryptKey := ""
 	flag.StringVar(&appConfig.SourceAddress, "source-address", "", "The source address to listen and receive source data")
-	flag.StringVar(&appConfig.SourceEncryptKey, "source-encrypt-key", "", "The source encrypt key for data decription, leave empty means do not decription source data")
+	flag.StringVar(&sourceEncryptKey, "source-encrypt-key", "", "The source encrypt key for data decription, leave empty means do not decription source data")
 	flag.StringVar(&appConfig.DestinationAddress, "destination-address", "", "The destination address to send source data to")
-	flag.StringVar(&appConfig.DestinationEncryptKey, "destination-encrypt-key", "", "The destination encrypt key for data encryption, leave empty means do not encrypt data send to destination")
+	flag.StringVar(&destinationEncryptKey, "destination-encrypt-key", "", "The destination encrypt key for data encryption, leave empty means do not encrypt data send to destination")
 	flag.Parse()
 	if appConfig.DestinationAddress == "" || appConfig.SourceAddress == "" {
 		log.Fatal("source address or destination address must be set.")
@@ -43,7 +63,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("can't parse destination address %s, err=%s", appConfig.DestinationAddress, err)
 	}
-	appConfig.DestinationAddr = destinationAddr
+	appConfig.SourceEncryptKey = []byte(sourceEncryptKey)
+	appConfig.DestinationEncryptKey = []byte(destinationEncryptKey)
 
 	conn, err := net.ListenPacket("udp", appConfig.SourceAddress)
 	if err != nil {
@@ -70,9 +91,8 @@ func main() {
 		} else {
 			targetConn = tConn.(net.PacketConn)
 		}
-		if len(appConfig.SourceEncryptKey) > 0 {
-			//TODO decrypt
-		}
-		targetConn.WriteTo(buffer[0:n], appConfig.DestinationAddr)
+		data := xorData(buffer[0:n], appConfig.SourceEncryptKey)
+		data = xorData(data, appConfig.DestinationEncryptKey)
+		targetConn.WriteTo(data, destinationAddr)
 	}
 }
